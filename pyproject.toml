@@ -9,7 +9,7 @@ authors = [
     { name = "awwaawwa", email = "aw@funstory.ai" }
 ]
 maintainers = [
-    { name = "awwaawwa", email = "aw@funstory.ai" }
+    { name = "PDFidelity" }
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -60,8 +60,10 @@ cuda = ["onnxruntime-gpu>=1.16.1"]
 memray = ["memray>=1.17.1"]
 
 [project.urls]
-Homepage = "https://github.com/funstory-ai/BabelDOC"
-Issues = "https://github.com/funstory-ai/BabelDOC/issues"
+Homepage = "https://github.com/andygeek/pdfidelity-engine"
+Repository = "https://github.com/andygeek/pdfidelity-engine"
+Issues = "https://github.com/andygeek/pdfidelity-engine/issues"
+Upstream = "https://github.com/funstory-ai/BabelDOC"
 
 [project.scripts]
 babeldoc = "babeldoc.main:cli"

@@ -1,3 +1,11 @@
+# PDFidelity Engine
+
+PDFidelity-maintained fork of [funstory-ai/BabelDOC](https://github.com/funstory-ai/BabelDOC), under the same [AGPL-3.0 license](./LICENSE).
+
+Created on **2026-10-10** from BabelDOC **0.6.4**. Package name `BabelDOC`, Python imports `babeldoc`, and the `babeldoc` command remain compatible with upstream.
+
+See [PDFIDELITY.md](./PDFIDELITY.md) for provenance, development, modifications, and upstream synchronization. The documentation and package/download badges below describe the upstream project and its releases.
+
 <div align="center">
 
 <br/>
