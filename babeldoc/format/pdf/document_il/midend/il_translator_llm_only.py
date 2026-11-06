@@ -22,6 +22,9 @@ from babeldoc.format.pdf.document_il.midend.il_translator import (
     ParagraphTranslateTracker,
 )
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.language_names import (
+    language_display_name,
+)
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragraph
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
     is_placeholder_only_paragraph,
@@ -255,6 +258,26 @@ class ILTranslatorLLMOnly:
         logger.info(
             f"Translation completed. Total: {self.total_count}, Successful: {self.ok_count}, Fallback: {self.fallback_count}"
         )
+        # One greppable line per job for the quality dashboard / A-B comparisons.
+        incomplete = getattr(
+            getattr(self.translate_engine, "incomplete_completion_count", None),
+            "value",
+            None,
+        )
+        quality_line = "PDFIDELITY_QUALITY " + json.dumps(
+            {
+                "paragraphs": self.total_count,
+                "batch_ok": self.ok_count,
+                "fallback": self.fallback_count,
+                "fallback_kept_original": self.il_translator.kept_original_count,
+                "fallback_accepted_with_warning": self.il_translator.accepted_with_warning_count,
+                "incomplete_llm_completions": incomplete,
+            }
+        )
+        logger.info(quality_line)
+        # Plain stdout copy: the rich log handler wraps long lines, and the worker
+        # parses this exact line for its per-job quality report.
+        print(quality_line, flush=True)
 
     def _is_body_text_paragraph(self, paragraph: PdfParagraph) -> bool:
         """判断正文段落（当前仅 layout_label == 'text'）。
@@ -803,6 +826,23 @@ class ILTranslatorLLMOnly:
                             )
                             llm_translate_tracker.set_placeholder_full_match()
                             continue
+                    # A lost {vN} placeholder silently deletes that formula/number
+                    # from the output PDF (parse_translate_output drops it), so send
+                    # the paragraph to the per-paragraph path, which retries.
+                    missing_placeholders = (
+                        self.il_translator.missing_formula_placeholders(
+                            translate_input, output_unicode
+                        )
+                    )
+                    if missing_placeholders:
+                        llm_translate_tracker.set_error_message(
+                            f"Missing formula placeholders {missing_placeholders[:8]}, fallback."
+                        )
+                        logger.warning(
+                            f"Missing formula placeholders {missing_placeholders[:8]} "
+                            f"in paragraph {inputs[id_][2].debug_id}, fallback."
+                        )
+                        continue
                     # Apply the translation to the paragraph
                     self.il_translator.post_translate_paragraph(
                         inputs[id_][2],
@@ -901,8 +941,8 @@ class ILTranslatorLLMOnly:
                 role_block += "Follow all rules strictly."
         else:
             role_block = (
-                f"You are a professional {self.translation_config.lang_out} native translator who needs to fluently translate text "
-                f"into {self.translation_config.lang_out}.\n\n"
+                f"You are a professional {language_display_name(self.translation_config.lang_out)} native translator who needs to fluently translate text "
+                f"into {language_display_name(self.translation_config.lang_out)}.\n\n"
                 "Follow all rules strictly."
             )
 
@@ -979,7 +1019,7 @@ class ILTranslatorLLMOnly:
             contextual_hints_block=contextual_hints_block,
             json_input_str=json_input_str,
             glossary_tables_block=glossary_tables_block,
-            lang_out=self.translation_config.lang_out,
+            lang_out=language_display_name(self.translation_config.lang_out),
         )
 
     def _clean_json_output(self, llm_output: str) -> str:

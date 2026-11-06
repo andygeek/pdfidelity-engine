@@ -1072,6 +1072,44 @@ class Typesetting:
                 apply_layout=apply_layout,
             )
 
+        # PDFidelity: render_paragraph() clears the composition before calling us.
+        # If no scale fits we used to return with an empty composition, i.e. the
+        # paragraph vanished from the PDF. Overflowing text is better than a blank.
+        if apply_layout and final_typeset_units is None and typesetting_units:
+            forced_scale = max(min_scale, min(initial_scale, 0.7))
+            try:
+                typeset_units, _ = self._layout_typesetting_units(
+                    typesetting_units,
+                    box,
+                    forced_scale,
+                    line_skip,
+                    paragraph,
+                    False,
+                )
+                if typeset_units:
+                    logger.warning(
+                        f"Paragraph {getattr(paragraph, 'debug_id', None)} does not fit "
+                        f"its box at any scale; rendering with overflow at {forced_scale}."
+                    )
+                    paragraph.scale = forced_scale
+                    paragraph.pdf_paragraph_composition = []
+                    for unit in typeset_units:
+                        chars, curves, forms = unit.render()
+                        for char in chars:
+                            paragraph.pdf_paragraph_composition.append(
+                                PdfParagraphComposition(pdf_character=char),
+                            )
+                        for curve in curves:
+                            page.pdf_curve.append(curve)
+                        for form in forms:
+                            page.pdf_form.append(form)
+                    return forced_scale, typeset_units
+            except Exception:
+                logger.exception(
+                    f"Forced layout failed for paragraph "
+                    f"{getattr(paragraph, 'debug_id', None)}; it will be missing."
+                )
+
         # 最后返回最小缩放因子
         return min_scale, final_typeset_units
 
