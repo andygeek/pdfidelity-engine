@@ -53,7 +53,13 @@ Resolve and review conflicts while retaining our modifications. Commit the resul
 
 Keep fork changes identifiable and retain AGPL and copyright notices. For a modified version offered over a network, prominently offer users free access to its corresponding source, including required build/install/run scripts. The source must match the deployed revision; a public repository alone does not identify that revision. See `LICENSE`, especially sections 1, 4, 5, and 13.
 
-GitHub Actions are disabled for the initial setup. Inherited workflows and upstream release/package identifiers remain available for later adaptation. No fork package or container has been published, and this setup has not changed PDFidelity's production deployment.
+GitHub Actions are disabled for the initial setup. Inherited workflows and upstream release/package identifiers remain available for later adaptation. No fork package or container has been published.
+
+## Production revision
+
+Since 2026-11-07, PDFidelity's translation workers run commit [`33f5d0bb81a121d4e41516b5c9d52a9023de078d`](https://github.com/andygeek/pdfidelity-engine/commit/33f5d0bb81a121d4e41516b5c9d52a9023de078d) from the `pdfidelity/no-silent-loss` branch: BabelDOC 0.6.2 with the 2026-11-07 changes recorded below. The worker image copies this source tree over the BabelDOC 0.6.2 package of its pinned base image.
+
+`main` has the same changes merged on top of BabelDOC 0.6.4, which has not been deployed. Update this section with every production change.
 
 ## Modification record
 
@@ -62,3 +68,13 @@ GitHub Actions are disabled for the initial setup. Inherited workflows and upstr
 - Established the public PDFidelity fork with upstream history intact.
 - Added fork identity, provenance, maintenance instructions, and modification notices.
 - Updated package maintainer and repository URLs while preserving the original authors, package name, version, CLI, license, and engine implementation.
+
+### 2026-11-07
+
+- Validated the per-paragraph fallback: empty or truncated LLM answers are retried once without cache, and the original text is kept when the answer is still empty or too short, instead of leaving blank paragraphs or wiping bibliographies.
+- Sent paragraphs whose formula placeholders were lost to the fallback.
+- Rendered paragraphs that overflow their box instead of leaving them empty.
+- Used language names instead of language codes in prompts.
+- Detected index entries with spaced dot leaders.
+- Printed a `PDFIDELITY_QUALITY` summary line for the per-job quality report.
+- Merged these changes into `main` (BabelDOC 0.6.4) on 2026-11-08.
