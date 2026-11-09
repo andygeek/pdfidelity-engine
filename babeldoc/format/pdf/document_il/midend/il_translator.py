@@ -23,6 +23,9 @@ from babeldoc.format.pdf.document_il import PdfSameStyleCharacters
 from babeldoc.format.pdf.document_il import PdfSameStyleUnicodeCharacters
 from babeldoc.format.pdf.document_il import PdfStyle
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.language_names import (
+    language_display_name,
+)
 from babeldoc.format.pdf.document_il.utils.layout_helper import get_char_unicode_string
 from babeldoc.format.pdf.document_il.utils.layout_helper import get_paragraph_unicode
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_same_style
@@ -364,6 +367,10 @@ class ILTranslator:
         self.use_as_fallback = False
         self.add_content_filter_hint_lock = threading.Lock()
         self.docs = None
+        # Quality counters for the per-paragraph path (logged by ILTranslatorLLMOnly).
+        self.quality_counter_lock = threading.Lock()
+        self.kept_original_count = 0
+        self.accepted_with_warning_count = 0
 
         # Pre-compile patterns for placeholder-like tokens that may be hallucinated by LLM.
         # We only consider the same shapes as our own formula & rich-text placeholders.
@@ -384,6 +391,41 @@ class ILTranslator:
             return len(self.tokenizer.encode(text, disallowed_special=()))
         except Exception:
             return 0
+
+    @staticmethod
+    def missing_formula_placeholders(translate_input, output: str) -> list[str]:
+        """Formula placeholders of the input that are absent from the output.
+
+        parse_translate_output silently drops formulas whose placeholder the model
+        lost, so a missing placeholder means a number/formula disappears from the
+        translated PDF.
+        """
+        if translate_input is None or not output:
+            return []
+        missing = []
+        for placeholder in getattr(translate_input, "placeholders", []) or []:
+            if isinstance(placeholder, FormulaPlaceholder) and not re.search(
+                placeholder.regex_pattern, output, re.IGNORECASE
+            ):
+                missing.append(placeholder.placeholder)
+        return missing
+
+    def check_translation_output(
+        self, source_text: str, translated_text: str, translate_input=None
+    ) -> str | None:
+        """Return a short problem description, or None when the output looks sane."""
+        if not translated_text or not translated_text.strip():
+            return "empty output"
+        src_tokens = self.calc_token_count(source_text)
+        out_tokens = self.calc_token_count(translated_text)
+        if src_tokens >= 8 and out_tokens / max(src_tokens, 1) < 0.3:
+            return "output too short"
+        missing = self.missing_formula_placeholders(translate_input, translated_text)
+        if missing:
+            return f"missing formula placeholders {missing[:8]}"
+        if src_tokens >= 8 and out_tokens / max(src_tokens, 1) > 3:
+            return "output too long"
+        return None
 
     def translate(self, docs: Document):
         self.docs = docs
@@ -997,7 +1039,10 @@ class ILTranslator:
     ):
         """Post-translation processing: update paragraph with translated text."""
         tracker.set_output(translated_text)
-        if translated_text == translate_input:
+        # translate_input is a TranslateInput object; the previous comparison against
+        # the object itself was always False.
+        input_unicode = getattr(translate_input, "unicode", translate_input)
+        if translated_text == input_unicode:
             if llm_translate_tracker := tracker.last_llm_translate_tracker():
                 llm_translate_tracker.set_placeholder_full_match()
             return False
@@ -1033,8 +1078,8 @@ class ILTranslator:
                 role_block += "Follow all rules strictly."
         else:
             role_block = (
-                f"You are a professional {self.translation_config.lang_out} native translator who needs to fluently translate text "
-                f"into {self.translation_config.lang_out}.\n\n"
+                f"You are a professional {language_display_name(self.translation_config.lang_out)} native translator who needs to fluently translate text "
+                f"into {language_display_name(self.translation_config.lang_out)}.\n\n"
                 "Follow all rules strictly."
             )
         return role_block
@@ -1159,7 +1204,7 @@ class ILTranslator:
             role_block=role_block,
             glossary_block=glossary_block,
             context_block=context_block,
-            lang_out=self.translation_config.lang_out,
+            lang_out=language_display_name(self.translation_config.lang_out),
             text_to_translate=text,
         )
 
@@ -1237,7 +1282,7 @@ class ILTranslator:
                 if text is None:
                     return
                 llm_translate_tracker = tracker.new_llm_translate_tracker()
-                # Perform translation
+                llm_prompt = None
                 if self.support_llm_translate:
                     llm_prompt = self.generate_prompt_for_llm(
                         text,
@@ -1246,21 +1291,64 @@ class ILTranslator:
                         translate_input,
                     )
                     llm_translate_tracker.set_input(llm_prompt)
-                    translated_text = self.translate_engine.llm_translate(
-                        llm_prompt,
-                        rate_limit_params={
-                            "paragraph_token_count": paragraph_token_count
-                        },
+
+                def _call(ignore_cache: bool = False) -> str:
+                    if self.support_llm_translate:
+                        out = self.translate_engine.llm_translate(
+                            llm_prompt,
+                            ignore_cache=ignore_cache,
+                            rate_limit_params={
+                                "paragraph_token_count": paragraph_token_count
+                            },
+                        )
+                    else:
+                        out = self.translate_engine.translate(
+                            text,
+                            ignore_cache=ignore_cache,
+                            rate_limit_params={
+                                "paragraph_token_count": paragraph_token_count
+                            },
+                        )
+                    return re.sub(r"[. 。…，]{20,}", ".", out or "").strip()
+
+                # Perform translation. This path is also the fallback of
+                # ILTranslatorLLMOnly, so it must never accept an empty or obviously
+                # incomplete answer: that is what produced blank paragraphs.
+                translated_text = _call()
+                problem = self.check_translation_output(
+                    text, translated_text, translate_input
+                )
+                if problem:
+                    logger.warning(
+                        f"Suspicious translation for paragraph {paragraph.debug_id}: "
+                        f"{problem}. Retrying once without cache."
                     )
-                    llm_translate_tracker.set_output(translated_text)
-                else:
-                    translated_text = self.translate_engine.translate(
-                        text,
-                        rate_limit_params={
-                            "paragraph_token_count": paragraph_token_count
-                        },
+                    translated_text = _call(ignore_cache=True)
+                    problem = self.check_translation_output(
+                        text, translated_text, translate_input
                     )
-                translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
+                llm_translate_tracker.set_output(translated_text)
+                if problem in ("empty output", "output too short"):
+                    llm_translate_tracker.set_error_message(
+                        f"{problem}; keeping original text"
+                    )
+                    with self.quality_counter_lock:
+                        self.kept_original_count += 1
+                    logger.warning(
+                        f"Keeping original text for paragraph {paragraph.debug_id}: "
+                        f"{problem} after retry."
+                    )
+                    return
+                if problem:
+                    # e.g. missing formula placeholders: keep the translation (as
+                    # before) but make the loss visible in the logs.
+                    llm_translate_tracker.set_error_message(problem)
+                    with self.quality_counter_lock:
+                        self.accepted_with_warning_count += 1
+                    logger.warning(
+                        f"Accepted translation with issue for paragraph "
+                        f"{paragraph.debug_id}: {problem}"
+                    )
 
                 # Post-translation processing
                 self.post_translate_paragraph(

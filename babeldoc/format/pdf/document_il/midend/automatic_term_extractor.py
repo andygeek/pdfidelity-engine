@@ -13,6 +13,9 @@ from babeldoc.format.pdf.document_il import (
 )
 from babeldoc.format.pdf.document_il import PdfParagraph  # Renamed to avoid conflict
 from babeldoc.format.pdf.document_il.midend.il_translator import Page
+from babeldoc.format.pdf.document_il.utils.language_names import (
+    language_display_name,
+)
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragraph
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
     is_placeholder_only_paragraph,
@@ -27,6 +30,7 @@ if TYPE_CHECKING:
     from babeldoc.translator.translator import BaseTranslator
 
 logger = logging.getLogger(__name__)
+
 
 LLM_PROMPT_TEMPLATE: str = """
 You are an expert multilingual terminologist. Extract key terms from the text and translate them into {target_language}.
@@ -53,7 +57,7 @@ You are an expert multilingual terminologist. Extract key terms from the text an
 - If no terms: [].
 
 ### Example
-For terms “LLM”, “GPT”:
+For terms “large language model”, “GPT”:
 {example_output}
 
 Input Text:
@@ -315,11 +319,13 @@ class AutomaticTermExtractor:
                     reference_glossary_section += "\nPlease consider these existing translations for consistency when extracting new terms. IMPORTANT: You should also extract terms that appear in the reference glossaries above if they are found in the input text - don't skip them just because they already exist in the reference."
 
             prompt = LLM_PROMPT_TEMPLATE.format(
-                target_language=self.translation_config.lang_out,
+                target_language=language_display_name(
+                    self.translation_config.lang_out
+                ),
                 text_to_process="\n\n".join(inputs),
                 reference_glossary_section=reference_glossary_section,
                 example_output="""[
-  {"src": "LLM", "tgt": "大语言模型"},
+  {"src": "large language model", "tgt": "<its translation in the target language>"},
   {"src": "GPT", "tgt": "GPT"}
 ]""",
             )

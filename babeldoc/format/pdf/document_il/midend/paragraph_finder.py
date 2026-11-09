@@ -39,6 +39,16 @@ from babeldoc.format.pdf.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 
+# Table-of-contents / index entry: dot (or similar) leaders followed by a page
+# reference at the end of the line. FrameMaker/Word often emit spaced leaders
+# (". . . . 12") or middle dots, which the original "20 contiguous periods" rule
+# missed, so whole indexes were merged into one paragraph.
+TOC_ENTRY_LINE_RE = re.compile(
+    r"(?:\.{20,})"
+    r"|(?:(?:(?:[.\u00b7\u2022\u2024_][ \t\u00a0]{0,6}){6,}|(?:\u2026\s?){2,})\s*"
+    r"(?:\d{1,4}|[ivxlcdm]{1,7}|[IVXLCDM]{1,7})(?:[-\u2013]\d{1,4})?\s*$)"
+)
+
 # Base58 alphabet (Bitcoin style, without numbers 0, O, I, l)
 BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -863,7 +873,7 @@ class ParagraphFinder:
 
                 # 检查是否包含连续的点（至少 20 个）
                 # 如果有至少连续 20 个点，则代表这是目录条目
-                if re.search(r"\.{20,}", prev_text):
+                if TOC_ENTRY_LINE_RE.search(prev_text):
                     # 创建新的段落
                     new_paragraph = PdfParagraph(
                         box=Box(0, 0, 0, 0),  # 临时边界框
